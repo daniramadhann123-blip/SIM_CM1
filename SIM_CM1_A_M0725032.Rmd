@@ -1,0 +1,408 @@
+---
+title: "Analisis Pola Penyewaan dan Pendapatan Toko DVD"
+subtitle: "Studi Kasus: Database Sakila"
+author: "Dani Ramadhan — M0725032"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    code_folding: show
+---
+
+```{css, echo=FALSE}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fira+Code&display=swap');
+
+body {
+  font-family: 'Inter', sans-serif;
+  font-size: 15px;
+  color: #2c3e50;
+  line-height: 1.75;
+}
+
+h1.title { font-size: 2em; color: #1565c0; }
+h3.subtitle { color: #5c6bc0; font-weight: 400; }
+.author, .date { color: #78909c; font-size: 0.95em; }
+
+.section h1 { border-bottom: 3px solid #1565c0; padding-bottom: 8px; margin-top: 40px; }
+.section h2 { border-left: 4px solid #5c6bc0; padding-left: 12px; color: #283593; }
+.section h3 { color: #3949ab; }
+
+.id-box {
+  background: #e3f2fd;
+  border: 1px solid #90caf9;
+  border-radius: 8px;
+  padding: 14px 20px;
+  margin: 16px 0 28px 0;
+  font-size: 14px;
+  color: #1a252f;
+}
+
+.callout-blue   { background: #e8f4fd; border-left: 5px solid #1565c0; padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 16px 0; color: #0d3c61; }
+.callout-green  { background: #e8f5e9; border-left: 5px solid #2e7d32; padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 16px 0; color: #1b5e20; }
+.callout-amber  { background: #fff8e1; border-left: 5px solid #f9a825; padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 16px 0; color: #5d4037; }
+.callout-purple { background: #ede7f6; border-left: 5px solid #6a1b9a; padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 16px 0; color: #4a148c; }
+
+pre, code { font-family: 'Fira Code', monospace; font-size: 13px; }
+
+#TOC { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px; font-size: 14px; }
+#TOC li a { color: #3949ab; }
+
+.custom-footer {
+  margin-top: 50px;
+  padding: 16px 0;
+  border-top: 2px solid #e0e0e0;
+  text-align: center;
+  color: #90a4ae;
+  font-size: 13px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE,
+  fig.align = "center", fig.width = 9, fig.height = 5.5, dpi = 150
+)
+```
+
+<div class="id-box">
+<strong>Nama:</strong> Dani Ramadhan &nbsp;|&nbsp;
+<strong>NIM:</strong> M0725032 &nbsp;|&nbsp;
+<strong>Kelas:</strong> A &nbsp;|&nbsp;
+<strong>Mata Kuliah:</strong> Sistem Informasi Manajemen
+</div>
+
+---
+
+# Pendahuluan
+
+## Deskripsi Data dan Insight
+
+<div class="callout-blue">
+<strong>Tentang Database Sakila</strong><br>
+Database <em>Sakila</em> adalah contoh database relasional yang dikembangkan oleh MySQL untuk merepresentasikan sistem manajemen toko penyewaan DVD. Database ini terdiri dari <strong>23 tabel</strong> yang mencakup informasi lengkap mengenai film, pelanggan, staf, transaksi sewa, dan pembayaran.
+</div>
+
+**Pertanyaan riset:** Bagaimana distribusi pendapatan berdasarkan kategori film, dan apakah terdapat hubungan antara volume penyewaan dengan total pendapatan yang dihasilkan setiap kategori?
+
+Tujuan analisis:
+
+1. Mengidentifikasi kategori film paling diminati berdasarkan volume rental
+2. Mengevaluasi kategori film dengan pendapatan tertinggi dan terendah
+3. Mengukur variabilitas pendapatan antar kategori menggunakan statistik deskriptif
+4. Menganalisis hubungan (korelasi) antara jumlah rental dan total pendapatan
+
+Tabel yang digunakan: `category`, `film_category`, `film`, `inventory`, `rental`, `payment`.
+
+## Persamaan Matematis
+
+**Rata-rata pendapatan per kategori:**
+$$\bar{X}_{k} = \frac{\sum_{i=1}^{n_k} P_i}{n_k}$$
+
+di mana $P_i$ adalah nilai pembayaran ke-$i$ pada kategori $k$, dan $n_k$ adalah total transaksi pada kategori tersebut.
+
+**Simpangan baku:**
+$$\sigma = \sqrt{\frac{\sum_{i=1}^{n}(X_i - \bar{X})^2}{n-1}}$$
+
+**Koefisien Variasi (CV):**
+$$CV = \frac{\sigma}{\bar{X}} \times 100\%$$
+
+**Korelasi Pearson:**
+$$r = \frac{\sum_{i=1}^{n}(x_i - \bar{x})(y_i - \bar{y})}{\sqrt{\sum_{i=1}^{n}(x_i - \bar{x})^2 \cdot \sum_{i=1}^{n}(y_i - \bar{y})^2}}$$
+
+dengan $r \in [-1, 1]$, nilai $|r|$ mendekati 1 menunjukkan korelasi yang kuat.
+
+---
+
+# Analisis Data
+
+## Load Library dan Koneksi Database
+
+```{r library}
+library(DBI)
+library(RMySQL)
+library(tidyverse)
+library(ggplot2)
+library(scales)
+library(kableExtra)
+library(ggrepel)
+```
+
+```{r koneksi, eval=FALSE}
+con <- dbConnect(
+  MySQL(),
+  dbname   = "sakila",
+  host     = "127.0.0.1",
+  port     = 3306,
+  user     = "root",
+  password = "isi_password_anda"
+)
+```
+
+<div class="callout-amber">
+<strong>Catatan keamanan:</strong> Password database tidak ditampilkan langsung dalam kode untuk menjaga keamanan kredensial.
+</div>
+
+## Pengambilan Data
+
+```{r query, eval=FALSE}
+df_kategori <- dbGetQuery(con, "
+  SELECT
+    c.name                 AS kategori,
+    COUNT(r.rental_id)     AS total_rental,
+    SUM(p.amount)          AS total_pendapatan,
+    AVG(p.amount)          AS rata_pendapatan
+  FROM category c
+  JOIN film_category fc ON c.category_id = fc.category_id
+  JOIN film f           ON fc.film_id    = f.film_id
+  JOIN inventory i      ON f.film_id     = i.film_id
+  JOIN rental r         ON i.inventory_id = r.inventory_id
+  JOIN payment p        ON r.rental_id   = p.rental_id
+  GROUP BY c.name
+  ORDER BY total_pendapatan DESC
+")
+dbDisconnect(con)
+```
+
+```{r data-manual, include=FALSE}
+df_kategori <- data.frame(
+  kategori = c("Sports","Sci-Fi","Animation","Drama","Comedy","Action",
+               "New","Games","Foreign","Family","Documentary",
+               "Horror","Children","Classics","Travel","Music"),
+  total_rental = c(1179,1101,1166,1060,941,1112,940,969,1033,
+                   1096,1050,846,945,939,837,830),
+  total_pendapatan = c(5314.21,4756.98,4656.30,4587.39,4383.58,
+                       4375.85,4351.62,4281.33,4270.67,4226.07,
+                       4217.52,3722.54,3655.55,3639.59,3549.64,3417.72),
+  rata_pendapatan = c(4.51,4.32,3.99,4.33,4.66,3.93,4.63,4.42,
+                      4.13,3.86,4.02,4.40,3.87,3.88,4.24,4.12),
+  stringsAsFactors = FALSE
+)
+```
+
+## Statistik Deskriptif {.tabset}
+
+### Tabel Ringkasan
+
+```{r tabel}
+df_kategori %>%
+  mutate(
+    total_pendapatan = dollar(total_pendapatan, accuracy = 0.01),
+    rata_pendapatan  = dollar(rata_pendapatan,  accuracy = 0.01),
+    total_rental     = comma(total_rental)
+  ) %>%
+  rename(
+    "Kategori"               = kategori,
+    "Total Rental"           = total_rental,
+    "Total Pendapatan (USD)" = total_pendapatan,
+    "Rata-rata / Transaksi"  = rata_pendapatan
+  ) %>%
+  kable(caption = "Tabel 1. Ringkasan Pendapatan dan Volume Rental per Kategori Film",
+        align = c("l","r","r","r")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","bordered","condensed"),
+                full_width = TRUE, font_size = 13) %>%
+  row_spec(0,  bold = TRUE, color = "white", background = "#1565c0") %>%
+  row_spec(1,  bold = TRUE, background = "#fff9c4") %>%
+  row_spec(16, background = "#fce4ec")
+```
+
+### Ukuran Pemusatan & Penyebaran
+
+```{r statistik-deskriptif}
+cv <- round(sd(df_kategori$total_pendapatan) /
+            mean(df_kategori$total_pendapatan) * 100, 2)
+
+data.frame(
+  Ukuran = c("Minimum","Kuartil 1 (Q1)","Median (Q2)",
+             "Mean (Rata-rata)","Kuartil 3 (Q3)","Maksimum",
+             "Simpangan Baku (SD)",
+             paste0("Koefisien Variasi = ", cv, "%")),
+  Nilai = c(
+    dollar(min(df_kategori$total_pendapatan), accuracy=0.01),
+    dollar(quantile(df_kategori$total_pendapatan, 0.25), accuracy=0.01),
+    dollar(median(df_kategori$total_pendapatan), accuracy=0.01),
+    dollar(mean(df_kategori$total_pendapatan), accuracy=0.01),
+    dollar(quantile(df_kategori$total_pendapatan, 0.75), accuracy=0.01),
+    dollar(max(df_kategori$total_pendapatan), accuracy=0.01),
+    dollar(sd(df_kategori$total_pendapatan), accuracy=0.01),
+    paste0(cv, "%")
+  )
+) %>%
+  kable(caption = "Tabel 2. Statistik Deskriptif Total Pendapatan per Kategori",
+        col.names = c("Ukuran Statistik","Nilai"), align = c("l","r")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","bordered"),
+                full_width = FALSE, font_size = 13) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#283593") %>%
+  row_spec(4, bold = TRUE, background = "#e8f4fd") %>%
+  row_spec(8, bold = TRUE, background = "#e8f5e9")
+```
+
+---
+
+## Visualisasi Data
+
+### Visualisasi 1: Pendapatan per Kategori Film
+
+```{r vis1, fig.cap="Gambar 1. Total pendapatan berdasarkan kategori film. Biru tua = tertinggi, merah = terendah."}
+df_kategori %>%
+  mutate(highlight = case_when(
+    total_pendapatan == max(total_pendapatan) ~ "Tertinggi",
+    total_pendapatan == min(total_pendapatan) ~ "Terendah",
+    TRUE ~ "Lainnya"
+  )) %>%
+  ggplot(aes(x = reorder(kategori, total_pendapatan),
+             y = total_pendapatan, fill = highlight)) +
+  geom_col(width = 0.75) +
+  geom_text(aes(label = dollar(total_pendapatan, accuracy = 1)),
+            hjust = -0.1, size = 3.2, color = "#37474f", fontface = "bold") +
+  coord_flip() +
+  scale_fill_manual(
+    values = c("Tertinggi"="#1565c0","Terendah"="#e57373","Lainnya"="#90caf9"),
+    name = "Keterangan") +
+  scale_y_continuous(labels = dollar_format(),
+                     expand = expansion(mult = c(0, 0.18))) +
+  labs(title    = "Total Pendapatan Berdasarkan Kategori Film",
+       subtitle = "Database Sakila — Seluruh Periode Transaksi",
+       x = NULL, y = "Total Pendapatan (USD)") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title         = element_text(face="bold", color="#1a252f", size=14),
+        plot.subtitle      = element_text(color="#78909c", size=11),
+        legend.position    = "bottom",
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor   = element_blank())
+```
+
+### Visualisasi 2: Korelasi Rental dan Pendapatan
+
+```{r vis2, fig.cap="Gambar 2. Scatter plot hubungan volume rental dan total pendapatan per kategori."}
+ggplot(df_kategori, aes(x = total_rental, y = total_pendapatan)) +
+  geom_smooth(method = "lm", se = TRUE, color = "#e53935",
+              fill = "#ffcdd2", alpha = 0.3, linewidth = 1) +
+  geom_point(color = "#1565c0", size = 4, alpha = 0.85) +
+  geom_text_repel(aes(label = kategori), size = 3.2, color = "#37474f",
+                  box.padding = 0.4, max.overlaps = 20) +
+  scale_x_continuous(labels = comma_format()) +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title    = "Hubungan Volume Rental dan Total Pendapatan",
+       subtitle = "Garis merah: regresi linear dengan interval kepercayaan 95%",
+       x = "Total Jumlah Rental", y = "Total Pendapatan (USD)") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title    = element_text(face="bold", color="#1a252f", size=14),
+        plot.subtitle = element_text(color="#78909c", size=11),
+        panel.grid.minor = element_blank())
+```
+
+### Uji Korelasi Pearson
+
+```{r korelasi}
+cor_test  <- cor.test(df_kategori$total_rental,
+                      df_kategori$total_pendapatan, method = "pearson")
+model     <- lm(total_pendapatan ~ total_rental, data = df_kategori)
+r_squared <- summary(model)$r.squared
+
+data.frame(
+  Statistik = c("Koefisien korelasi (r)","R-squared (R²)",
+                "P-value","Intersep (a)","Koefisien regresi (b)","Kesimpulan"),
+  Nilai = c(
+    round(cor_test$estimate, 4),
+    round(r_squared, 4),
+    round(cor_test$p.value, 4),
+    round(coef(model)[1], 3),
+    round(coef(model)[2], 4),
+    ifelse(cor_test$p.value < 0.05,
+           "Signifikan (p < 0.05)", "Tidak signifikan (p >= 0.05)")
+  )
+) %>%
+  kable(caption = "Tabel 3. Hasil Uji Korelasi Pearson",
+        col.names = c("Statistik","Nilai"), align = c("l","r")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","bordered"),
+                full_width = FALSE, font_size = 13) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#283593") %>%
+  row_spec(6, bold = TRUE, background = "#e8f5e9")
+```
+
+Persamaan regresi linear yang diperoleh:
+
+$$\widehat{Y} = `r round(coef(model)[1], 2)` + `r round(coef(model)[2], 4)` \cdot X$$
+
+di mana $\widehat{Y}$ adalah prediksi total pendapatan (USD) dan $X$ adalah jumlah rental.
+
+---
+
+# Interpretasi dan Kesimpulan
+
+## Ringkasan Temuan Utama
+
+```{r ringkasan}
+data.frame(
+  Indikator    = c("Pendapatan tertinggi","Pendapatan terendah",
+                   "Rata-rata pendapatan","Koefisien Variasi (CV)",
+                   "Total kategori dianalisis"),
+  Nilai        = c("$5.314,21","$3.417,72","$4.213,07","10,16%","16 kategori"),
+  Keterangan   = c("Kategori Sports","Kategori Music",
+                   "Distribusi relatif merata","Variabilitas rendah",
+                   "Cakupan analisis menyeluruh")
+) %>%
+  kable(caption = "Tabel 4. Ringkasan Temuan Utama Analisis",
+        align = c("l","c","l")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","bordered"),
+                full_width = TRUE, font_size = 13) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#1565c0") %>%
+  row_spec(1, bold = TRUE, background = "#e3f2fd") %>%
+  row_spec(2, background = "#fce4ec")
+```
+
+## Interpretasi Visualisasi 1: Distribusi Pendapatan
+
+Berdasarkan bar chart pada Gambar 1, kategori **Sports** mendominasi pendapatan dengan total **$5.314,21**, diikuti **Sci-Fi** ($4.756,98) dan **Animation** ($4.656,30). Ketiga kategori ini secara konsisten menempati posisi teratas, mencerminkan preferensi pelanggan yang kuat terhadap konten bertema aksi, sains fiksi, dan animasi.
+
+Di sisi lain, kategori **Music** mencatat pendapatan paling rendah sebesar **$3.417,72**, diikuti **Travel** ($3.549,64) dan **Classics** ($3.639,59). Pola ini mengindikasikan bahwa film bertema seni, perjalanan, dan klasik kurang diminati dalam konteks penyewaan DVD.
+
+Nilai **Koefisien Variasi (CV) = 10,16%** tergolong rendah, artinya distribusi pendapatan antar kategori relatif **seragam dan merata**. Ini merupakan indikator positif bahwa portofolio film Sakila cukup seimbang dalam menghasilkan pendapatan dari berbagai segmen genre.
+
+## Interpretasi Visualisasi 2 dan Uji Korelasi
+
+Scatter plot pada Gambar 2 memperlihatkan pola hubungan **positif** antara volume rental dan total pendapatan. Namun hubungan ini **tidak sempurna**, terlihat dari sebaran titik yang tidak membentuk garis lurus secara ketat.
+
+Beberapa temuan penting:
+
+- Nilai $r$ positif mengonfirmasi hubungan antara volume rental dan pendapatan bersifat **searah**
+- Kategori **Sports** menjadi outlier positif — pendapatannya sangat tinggi relatif terhadap jumlah rental-nya, menunjukkan bahwa *rental rate* per transaksi juga berperan signifikan
+- Kategori **Comedy** dan **New** memiliki volume rental lebih rendah namun rata-rata pendapatan per transaksi yang cukup tinggi, mengindikasikan adanya perbedaan tarif sewa
+
+<div class="callout-green">
+<strong>Implikasi bisnis:</strong> Strategi peningkatan pendapatan tidak cukup hanya dengan menambah stok film populer. Pengelola toko perlu mempertimbangkan optimasi <em>rental rate</em> pada kategori dengan volume tinggi namun pendapatan relatif rendah seperti <strong>Animation</strong> dan <strong>Action</strong>.
+</div>
+
+## Kesimpulan
+
+Analisis terhadap database Sakila menghasilkan beberapa kesimpulan penting:
+
+1. **Distribusi pendapatan bersifat moderat-merata** (CV = 10,16%), namun rentang antara kategori tertinggi (Sports) dan terendah (Music) mencapai **$1.896,49** atau sekitar 55% dari nilai minimum.
+2. **Volume rental tidak sepenuhnya menentukan pendapatan** — *rental rate* merupakan variabel penting yang memengaruhi pendapatan secara independen.
+3. **Kategori Sports, Sci-Fi, dan Animation** merupakan *top performer* yang sebaiknya diprioritaskan dalam pengadaan stok dan promosi.
+4. **Kategori Music, Travel, dan Classics** perlu dievaluasi lebih lanjut terkait penyebab rendahnya pendapatan.
+
+<div class="callout-purple">
+<strong>Saran analisis lanjutan:</strong> Dapat ditambahkan variabel <code>rental_rate</code> dan <code>length</code> dari tabel <code>film</code>, serta analisis temporal (tren per bulan) untuk mengidentifikasi musim puncak penyewaan.
+</div>
+
+---
+
+# Referensi
+
+- MySQL Documentation. (2024). *Sakila Sample Database*. https://dev.mysql.com/doc/sakila/en/
+- Wickham, H., & Grolemund, G. (2017). *R for Data Science*. O'Reilly Media. https://r4ds.had.co.nz/
+- Zhu, H. (2024). *kableExtra: Construct Complex Table with 'kable' and Pipe Syntax*. https://cran.r-project.org/package=kableExtra
+
+---
+
+<div class="custom-footer">
+Laporan dibuat menggunakan R Markdown &bull; Database: MySQL Sakila &bull; Dani Ramadhan (M0725032) &bull; SIM Kelas A
+</div>
