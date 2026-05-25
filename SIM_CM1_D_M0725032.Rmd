@@ -74,7 +74,7 @@ knitr::opts_chunk$set(
 <div class="id-box">
 <strong>Nama:</strong> Dani Ramadhan &nbsp;|&nbsp;
 <strong>NIM:</strong> M0725032 &nbsp;|&nbsp;
-<strong>Kelas:</strong> A &nbsp;|&nbsp;
+<strong>Kelas:</strong> D &nbsp;|&nbsp;
 <strong>Mata Kuliah:</strong> Sistem Informasi Manajemen
 </div>
 
